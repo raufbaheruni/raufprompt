@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAUF BAHERUNI - Prompt Extractor V2</title>
+    <!-- नया AI Model लोड करने वाली लाइब्रेरी -->
+    <script type="module">
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0';
+        env.allowLocalModels = false;
+        env.useBrowserCache = true;
+        window.pipeline = pipeline;
+    </script>
+    <style>
+        :root { --bg: #080808; --panel: #111111; --text: #e0e0e0; --border: #222222; --accent: #00ffcc; }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 0; background-color: var(--bg); color: var(--text); font-family: 'Segoe UI', Roboto, sans-serif; display: flex; justify-content: center; min-height: 100vh; }
+        .app { width: 100%; max-width: 500px; padding: 20px; }
+        
+        .header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
+        .profile-img { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); }
+        .header h1 { font-size: 22px; margin: 0; color: #fff; font-weight: 800; }
+        .header p { font-size: 10px; color: var(--accent); margin: 4px 0 0 0; letter-spacing: 1.5px; text-transform: uppercase; }
+
+        .canvas-wrap { background: #000; border: 2px dashed #333; border-radius: 12px; width: 100%; height: 300px; display: flex; justify-content: center; align-items: center; overflow: hidden; margin-bottom: 20px; position: relative; }
+        #previewImg { max-width: 100%; max-height: 100%; display: none; border-radius: 8px; }
+        .upload-prompt { color: #444; text-align: center; cursor: pointer; }
+        .upload-prompt span { font-size: 40px; display: block; margin-bottom: 8px; }
+        input[type="file"] { display: none; }
+
+        .btn { width: 100%; padding: 16px; font-size: 16px; font-weight: 800; border: none; border-radius: 12px; cursor: pointer; text-transform: uppercase; transition: 0.2s; margin-top: 10px; }
+        .btn-process { background: var(--accent); color: #000; box-shadow: 0 4px 15px rgba(0,255,204,0.2); }
+        .btn-copy { background: #ffffff; color: #000; }
+        .btn:disabled { background: #222; color: #555; cursor: not-allowed; box-shadow: none; }
+
+        .output-box { background: #050505; border: 1px solid var(--border); border-radius: 12px; padding: 15px; margin-top: 15px; }
+        .output-box h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--accent); text-align: center; }
+        textarea { width: 100%; background: #000; border: 1px solid #222; border-radius: 8px; color: var(--text); padding: 12px; font-size: 14px; min-height: 100px; resize: none; font-family: monospace; }
+        textarea:focus { outline: none; border-color: var(--accent); }
+        
+        .log-text { text-align: center; color: var(--accent); font-size: 12px; margin-top: 10px; display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="app">
+        <div class="header">
+            <img src="https://z-cdn-media.chatglm.cn/files/9a86aa27-f7ac-4a4e-8e7d-4fe01b2cd2b7.png" alt="Rauf Baheruni" class="profile-img" onerror="this.src='https://via.placeholder.com/60'">
+            <div>
+                <h1>RAUF BAHERUNI</h1>
+                <p>AI PROMPT EXTRACTOR (V2)</p>
+            </div>
+        </div>
+
+        <div class="canvas-wrap" id="canvasWrap">
+            <img id="previewImg" src="" alt="Preview">
+            <div class="upload-prompt" id="uploadPrompt">
+                <span>🖼️</span>
+                Tap to Upload Photo
+                <input type="file" id="fileInput" accept="image/*">
+            </div>
+        </div>
+
+        <button class="btn btn-process" id="extractBtn" onclick="extractPrompt()" disabled>🔍 EXTRACT PROMPT</button>
+        <div class="log-text" id="logText">⏳ AI मॉडल लोड हो रहा है... कृपया प्रतीक्षा करें (पहली बार 15-20 सेकंड लग सकते हैं)</div>
+
+        <div class="output-box" style="display:none;" id="outputBox">
+            <h3>📝 EXTRACTED PROMPT (Copy & Paste)</h3>
+            <textarea id="promptOutput" readonly></textarea>
+            <button class="btn btn-copy" style="margin-top: 10px;" onclick="copyText()">📋 COPY PROMPT</button>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const canvasWrap = document.getElementById('canvasWrap');
+        const previewImg = document.getElementById('previewImg');
+        const uploadPrompt = document.getElementById('uploadPrompt');
+        const extractBtn = document.getElementById('extractBtn');
+        const logText = document.getElementById('logText');
+        const outputBox = document.getElementById('outputBox');
+        let extractor = null;
+
+        canvasWrap.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                previewImg.src = ev.target.result;
+                previewImg.style.display = 'block';
+                uploadPrompt.style.display = 'none';
+                extractBtn.disabled = false;
+                outputBox.style.display = 'none';
+            };
+            reader.readAsDataURL(file);
+        });
+
+        async function extractPrompt() {
+            if (!previewImg.src) return;
+            extractBtn.disabled = true;
+            extractBtn.innerText = "⏳ Processing...";
+            logText.style.display = 'block';
+
+            try {
+                // अगर AI मॉडल पहले से लोड नहीं है, तो लोड करें (नया BLIP मॉडल)
+                if (!extractor) {
+                    logText.innerText = "⏳ AI मॉडल डाउनलोड हो रहा है (पहली बार 15-20 सेकंड लग सकते हैं)...";
+                    extractor = await window.pipeline('image-to-text', 'Xenova/blip-image-captioning-base');
+                }
+                
+                logText.innerText = "🔍 फोटो का प्रॉम्प्ट निकाला जा रहा है...";
+                const output = await extractor(previewImg.src);
+                
+                // AI से मिला टेक्स्ट
+                let basePrompt = output[0].generated_text;
+                
+                // इसे Midjourney/Stable Diffusion प्रॉम्प्ट जैसा बनाने के लिए एडिट करें
+                let enhancedPrompt = `${basePrompt}, highly detailed, 8k resolution, cinematic lighting, ultra realistic, masterpiece, sharp focus, trending on artstation, vivid colors`;
+                
+                document.getElementById('promptOutput').value = enhancedPrompt;
+                outputBox.style.display = 'block';
+                logText.style.display = 'none';
+                extractBtn.innerText = "✅ Prompt Extracted!";
+                
+                setTimeout(() => { extractBtn.innerText = "🔍 EXTRACT PROMPT"; extractBtn.disabled = false; }, 2000);
+
+            } catch (error) {
+                logText.innerText = "❌ Error: " + error.message;
+                extractBtn.disabled = false;
+                extractBtn.innerText = "🔍 EXTRACT PROMPT";
+            }
+        }
+
+        function copyText() {
+            const textarea = document.getElementById('promptOutput');
+            textarea.select();
+            document.execCommand('copy');
+            alert('प्रॉम्प्ट कॉपी हो गया है! ✅');
+        }
+    </script>
+</body>
+</html>
